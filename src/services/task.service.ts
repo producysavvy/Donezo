@@ -263,7 +263,12 @@ export async function updateTask(
         dueDate: input.dueDate,
         assigneeId: input.assigneeId,
         position: input.position,
-        completedAt: input.status === TaskStatus.DONE ? new Date() : undefined,
+        completedAt:
+          input.status === undefined
+            ? undefined
+            : input.status === TaskStatus.DONE
+              ? new Date()
+              : null,
       },
       include: taskInclude,
     });

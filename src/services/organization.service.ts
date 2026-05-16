@@ -197,6 +197,24 @@ export async function listMembers(userId: string, organizationId: string) {
   });
 }
 
+export async function listAssignableMembers(userId: string, organizationId: string) {
+  await requireMembership(userId, organizationId, "task:create");
+
+  return prisma.organizationMembership.findMany({
+    where: { organizationId },
+    include: {
+      user: {
+        select: {
+          id: true,
+          email: true,
+          name: true,
+        },
+      },
+    },
+    orderBy: [{ role: "asc" }, { createdAt: "asc" }],
+  });
+}
+
 export async function updateMemberRole(
   userId: string,
   organizationId: string,

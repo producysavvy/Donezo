@@ -6,7 +6,7 @@ type ProjectListProps = {
 
 export function ProjectList({ projects }: ProjectListProps) {
   return (
-    <section className="rounded border border-line bg-white p-4">
+    <section id="projects" className="rounded border border-line bg-white p-4">
       <h2 className="text-lg font-semibold text-ink">Projects</h2>
       <div className="mt-4 space-y-3">
         {projects.map((project) => (

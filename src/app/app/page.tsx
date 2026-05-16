@@ -11,6 +11,8 @@ import { ProjectList } from "@/components/app/ProjectList";
 import { StatStrip } from "@/components/app/StatStrip";
 import type {
   ActivityView,
+  LabelView,
+  MemberView,
   NotificationView,
   OrganizationView,
   ProjectView,
@@ -18,9 +20,14 @@ import type {
 } from "@/components/app/types";
 import { requireCurrentSession } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
+import { hasOrgPermission } from "@/lib/rbac";
 import { listLabels } from "@/services/label.service";
 import { listNotifications } from "@/services/notification.service";
-import { listOrganizations } from "@/services/organization.service";
+import {
+  listAssignableMembers,
+  listMembers,
+  listOrganizations,
+} from "@/services/organization.service";
 import { listProjects } from "@/services/project.service";
 import { listTasks } from "@/services/task.service";
 import { taskQuerySchema } from "@/validators/task";
@@ -55,23 +62,43 @@ export default async function AppPage() {
     memberCount: organization._count.memberships,
   }));
   const activeOrganization = organizationViews[0];
-  const projects = await listProjects(user.id, activeOrganization.id);
-  const tasksResult = await listTasks(
-    user.id,
-    activeOrganization.id,
-    taskQuerySchema.parse({ limit: "100" }),
-  );
-  await listLabels(user.id, activeOrganization.id);
-  const notificationsResult = await listNotifications(activeOrganization.id, user.id, {
-    unreadOnly: false,
-    limit: 8,
-  });
-  const activities = await prisma.activityLog.findMany({
-    where: { organizationId: activeOrganization.id },
-    include: { actor: { select: { name: true, email: true } } },
-    orderBy: { createdAt: "desc" },
-    take: 12,
-  });
+  const canCreateTasks = hasOrgPermission(activeOrganization.role, "task:create");
+  const canManageTasks = hasOrgPermission(activeOrganization.role, "task:update");
+  const canCreateProjects = hasOrgPermission(activeOrganization.role, "project:create");
+  const canManageMembers = hasOrgPermission(activeOrganization.role, "member:invite");
+  const [
+    projects,
+    tasksResult,
+    labels,
+    notificationsResult,
+    activities,
+    assignableMemberships,
+    memberRecords,
+  ] = await Promise.all([
+    listProjects(user.id, activeOrganization.id),
+    listTasks(
+      user.id,
+      activeOrganization.id,
+      taskQuerySchema.parse({ limit: "100" }),
+    ),
+    listLabels(user.id, activeOrganization.id),
+    listNotifications(activeOrganization.id, user.id, {
+      unreadOnly: false,
+      limit: 8,
+    }),
+    prisma.activityLog.findMany({
+      where: { organizationId: activeOrganization.id },
+      include: { actor: { select: { name: true, email: true } } },
+      orderBy: { createdAt: "desc" },
+      take: 12,
+    }),
+    canCreateTasks
+      ? listAssignableMembers(user.id, activeOrganization.id)
+      : Promise.resolve([]),
+    canManageMembers
+      ? listMembers(user.id, activeOrganization.id)
+      : Promise.resolve([]),
+  ]);
 
   const projectViews: ProjectView[] = projects.map((project) => ({
     id: project.id,
@@ -80,8 +107,30 @@ export default async function AppPage() {
     status: project.status,
     taskCount: project._count.tasks,
   }));
+  const labelViews: LabelView[] = labels.map((label) => ({
+    id: label.id,
+    name: label.name,
+    color: label.color,
+  }));
+  const assignableMemberViews: MemberView[] = assignableMemberships.map(
+    (membership) => ({
+      membershipId: membership.id,
+      userId: membership.user.id,
+      name: membership.user.name,
+      email: membership.user.email,
+      role: membership.role,
+    }),
+  );
+  const memberViews: MemberView[] = memberRecords.map((membership) => ({
+    membershipId: membership.id,
+    userId: membership.user.id,
+    name: membership.user.name,
+    email: membership.user.email,
+    role: membership.role,
+  }));
   const taskViews: TaskView[] = tasksResult.items.map((task) => ({
     id: task.id,
+    projectId: task.projectId,
     title: task.title,
     description: task.description,
     status: task.status,
@@ -89,6 +138,20 @@ export default async function AppPage() {
     dueDate: task.dueDate?.toISOString() ?? null,
     assignee: task.assignee,
     labels: task.labels.map((taskLabel) => taskLabel.label),
+    comments: task.comments.map((comment) => ({
+      id: comment.id,
+      body: comment.body,
+      createdAt: comment.createdAt.toISOString(),
+      author: comment.author,
+    })),
+    attachments: task.attachments.map((attachment) => ({
+      id: attachment.id,
+      fileName: attachment.fileName,
+      mimeType: attachment.mimeType,
+      sizeBytes: attachment.sizeBytes,
+      previewUrl: attachment.previewUrl,
+      createdAt: attachment.createdAt.toISOString(),
+    })),
     commentsCount: task.comments.length,
     attachmentsCount: task.attachments.length,
   }));
@@ -108,6 +171,12 @@ export default async function AppPage() {
     createdAt: activity.createdAt.toISOString(),
     actor: activity.actor,
   }));
+  const boardKey = taskViews
+    .map((task) => `${task.id}:${task.status}:${task.commentsCount}:${task.attachmentsCount}`)
+    .join("|");
+  const notificationsKey = notificationViews
+    .map((notification) => `${notification.id}:${notification.readAt ?? "unread"}`)
+    .join("|");
 
   return (
     <main className="min-h-screen bg-paper lg:grid lg:grid-cols-[18rem_1fr]">
@@ -116,7 +185,7 @@ export default async function AppPage() {
         organizations={organizationViews}
         activeOrganization={activeOrganization}
       />
-      <section className="min-w-0 p-4 lg:p-8">
+      <section id="dashboard" className="min-w-0 p-4 lg:p-8">
         <header className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase tracking-wide text-brand">
@@ -131,20 +200,41 @@ export default async function AppPage() {
 
         <div className="space-y-6">
           <StatStrip organization={activeOrganization} tasks={taskViews} />
-          <KanbanBoard tasks={taskViews} />
+          <KanbanBoard
+            key={boardKey}
+            organizationId={activeOrganization.id}
+            tasks={taskViews}
+            labels={labelViews}
+            members={assignableMemberViews}
+            canManageTasks={canManageTasks}
+          />
           <div className="grid gap-6 xl:grid-cols-[1fr_22rem]">
             <div className="space-y-6">
               <ProjectList projects={projectViews} />
               <CreateTaskPanel
                 organizationId={activeOrganization.id}
                 projects={projectViews}
+                labels={labelViews}
+                members={assignableMemberViews}
+                canCreateTasks={canCreateTasks}
               />
-              <CreateProjectPanel organizationId={activeOrganization.id} />
+              <CreateProjectPanel
+                organizationId={activeOrganization.id}
+                canCreateProjects={canCreateProjects}
+              />
             </div>
             <div className="space-y-6">
-              <NotificationCenter notifications={notificationViews} />
+              <NotificationCenter
+                key={notificationsKey}
+                organizationId={activeOrganization.id}
+                notifications={notificationViews}
+              />
               <ActivityFeed activities={activityViews} />
-              <InvitePanel organizationId={activeOrganization.id} />
+              <InvitePanel
+                organizationId={activeOrganization.id}
+                canInvite={canManageMembers}
+                members={memberViews}
+              />
             </div>
           </div>
         </div>

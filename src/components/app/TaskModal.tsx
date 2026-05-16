@@ -1,21 +1,139 @@
 "use client";
 
 import { X } from "lucide-react";
-import type { TaskView } from "@/components/app/types";
+import { useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  dateInputToIso,
+  mapComment,
+  mapTask,
+  type ApiComment,
+  type ApiTask,
+} from "@/components/app/taskMapper";
+import { TaskModalAttachments } from "@/components/app/TaskModalAttachments";
+import { TaskModalComments } from "@/components/app/TaskModalComments";
+import { TaskModalForm } from "@/components/app/TaskModalForm";
+import type { LabelView, MemberView, TaskView } from "@/components/app/types";
 
 type TaskModalProps = {
+  organizationId: string;
   task: TaskView | null;
+  labels: LabelView[];
+  members: MemberView[];
+  canManageTasks: boolean;
   onClose: () => void;
+  onTaskUpdated: (task: TaskView) => void;
 };
 
-export function TaskModal({ task, onClose }: TaskModalProps) {
+type ApiResponse<T> = {
+  data?: T;
+  error?: {
+    message?: string;
+  };
+};
+
+export function TaskModal({
+  organizationId,
+  task,
+  labels,
+  members,
+  canManageTasks,
+  onClose,
+  onTaskUpdated,
+}: TaskModalProps) {
+  const router = useRouter();
+  const commentFormRef = useRef<HTMLFormElement>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [commentMessage, setCommentMessage] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const [commentPending, setCommentPending] = useState(false);
+
   if (!task) {
     return null;
   }
 
+  async function saveTask(formData: FormData) {
+    if (!task) {
+      return;
+    }
+
+    setPending(true);
+    setMessage(null);
+
+    const assigneeId = stringValue(formData, "assigneeId");
+    const response = await fetch(
+      `/api/organizations/${organizationId}/tasks/${task.id}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: stringValue(formData, "title"),
+          description: stringValue(formData, "description") || null,
+          status: stringValue(formData, "status"),
+          priority: stringValue(formData, "priority"),
+          dueDate: dateInputToIso(formData.get("dueDate")),
+          assigneeId: assigneeId || null,
+          labelIds: formData.getAll("labelIds").map(String),
+        }),
+      },
+    );
+    const body = (await response.json()) as ApiResponse<ApiTask>;
+    setPending(false);
+
+    if (!response.ok || !body.data) {
+      setMessage(body.error?.message ?? "Task update failed");
+      return;
+    }
+
+    onTaskUpdated(mapTask(body.data));
+    setMessage("Saved");
+    router.refresh();
+  }
+
+  async function addComment(formData: FormData) {
+    if (!task) {
+      return;
+    }
+
+    setCommentPending(true);
+    setCommentMessage(null);
+
+    const response = await fetch(
+      `/api/organizations/${organizationId}/tasks/${task.id}/comments`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: stringValue(formData, "body") }),
+      },
+    );
+    const body = (await response.json()) as ApiResponse<ApiComment>;
+    setCommentPending(false);
+
+    if (!response.ok || !body.data) {
+      setCommentMessage(body.error?.message ?? "Comment failed");
+      return;
+    }
+
+    const comment = mapComment(body.data);
+    const comments = task.comments.some((existing) => existing.id === comment.id)
+      ? task.comments
+      : [...task.comments, comment];
+
+    onTaskUpdated({
+      ...task,
+      comments,
+      commentsCount: comments.length,
+    });
+    commentFormRef.current?.reset();
+    router.refresh();
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-      <section className="w-full max-w-2xl rounded border border-line bg-white p-6 shadow-soft">
+      <section
+        key={task.id}
+        className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded border border-line bg-white p-6 shadow-soft"
+      >
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-sm font-medium text-brand">{task.status}</p>
@@ -31,46 +149,33 @@ export function TaskModal({ task, onClose }: TaskModalProps) {
           </button>
         </div>
 
-        <p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-slate-700">
-          {task.description || "No description yet."}
-        </p>
+        <TaskModalForm
+          task={task}
+          labels={labels}
+          members={members}
+          canManageTasks={canManageTasks}
+          pending={pending}
+          message={message}
+          onSave={saveTask}
+        />
 
-        <dl className="mt-6 grid gap-3 text-sm md:grid-cols-2">
-          <Meta label="Priority" value={task.priority} />
-          <Meta label="Assignee" value={task.assignee?.name ?? "Unassigned"} />
-          <Meta
-            label="Due"
-            value={task.dueDate ? new Date(task.dueDate).toLocaleDateString() : "No date"}
+        <div className="mt-8 grid gap-6 lg:grid-cols-[1fr_18rem]">
+          <TaskModalComments
+            task={task}
+            canComment={canManageTasks}
+            pending={commentPending}
+            message={commentMessage}
+            formRef={commentFormRef}
+            onAddComment={addComment}
           />
-          <Meta
-            label="Discussion"
-            value={`${task.commentsCount} comments, ${task.attachmentsCount} files`}
-          />
-        </dl>
-
-        <div className="mt-6 flex flex-wrap gap-2">
-          {task.labels.map((label) => (
-            <span
-              key={label.id}
-              className="rounded px-2 py-1 text-xs font-medium text-white"
-              style={{ backgroundColor: label.color }}
-            >
-              {label.name}
-            </span>
-          ))}
+          <TaskModalAttachments task={task} />
         </div>
       </section>
     </div>
   );
 }
 
-function Meta({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded border border-line p-3">
-      <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-        {label}
-      </dt>
-      <dd className="mt-1 text-ink">{value}</dd>
-    </div>
-  );
+function stringValue(formData: FormData, key: string) {
+  const value = formData.get(key);
+  return typeof value === "string" ? value : "";
 }
