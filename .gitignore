@@ -1,0 +1,16 @@
+node_modules
+.next
+out
+coverage
+dist
+
+# Keep environment variables and local secrets out of version control.
+.env
+.env.*
+!.env.example
+
+# Runtime file storage for the local storage adapter.
+local-uploads
+
+# Prisma generated client output if the generator is changed later.
+/generated/prisma
