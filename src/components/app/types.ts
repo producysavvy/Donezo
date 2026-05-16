@@ -1,5 +1,41 @@
 import type { OrgRole, ProjectStatus, TaskPriority, TaskStatus } from "@prisma/client";
 
+export type UserSummary = {
+  id: string;
+  name: string;
+  email: string;
+};
+
+export type LabelView = {
+  id: string;
+  name: string;
+  color: string;
+};
+
+export type CommentView = {
+  id: string;
+  body: string;
+  createdAt: string;
+  author: UserSummary;
+};
+
+export type AttachmentView = {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  previewUrl: string | null;
+  createdAt: string;
+};
+
+export type MemberView = {
+  membershipId: string;
+  userId: string;
+  name: string;
+  email: string;
+  role: OrgRole;
+};
+
 export type OrganizationView = {
   id: string;
   name: string;
@@ -20,13 +56,16 @@ export type ProjectView = {
 
 export type TaskView = {
   id: string;
+  projectId: string;
   title: string;
   description: string | null;
   status: TaskStatus;
   priority: TaskPriority;
   dueDate: string | null;
-  assignee: { id: string; name: string; email: string } | null;
-  labels: { id: string; name: string; color: string }[];
+  assignee: UserSummary | null;
+  labels: LabelView[];
+  comments: CommentView[];
+  attachments: AttachmentView[];
   commentsCount: number;
   attachmentsCount: number;
 };

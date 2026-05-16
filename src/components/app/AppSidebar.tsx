@@ -23,10 +23,10 @@ export function AppSidebar({
       </div>
 
       <nav className="mt-8 space-y-1 text-sm font-medium text-slate-700">
-        <NavItem icon={<LayoutDashboard size={18} />} label="Dashboard" active />
-        <NavItem icon={<FolderKanban size={18} />} label="Projects" />
-        <NavItem icon={<Bell size={18} />} label="Notifications" />
-        <NavItem icon={<Users size={18} />} label="Members" />
+        <NavItem href="#dashboard" icon={<LayoutDashboard size={18} />} label="Dashboard" active />
+        <NavItem href="#projects" icon={<FolderKanban size={18} />} label="Projects" />
+        <NavItem href="#notifications" icon={<Bell size={18} />} label="Notifications" />
+        <NavItem href="#members" icon={<Users size={18} />} label="Members" />
       </nav>
 
       <div className="mt-auto pt-8">
@@ -50,22 +50,25 @@ export function AppSidebar({
 }
 
 function NavItem({
+  href,
   icon,
   label,
   active = false,
 }: {
+  href: string;
   icon: React.ReactNode;
   label: string;
   active?: boolean;
 }) {
   return (
-    <div
+    <a
+      href={href}
       className={`flex items-center gap-3 rounded px-3 py-2 ${
         active ? "bg-blue-50 text-brand" : "hover:bg-slate-50"
       }`}
     >
       {icon}
       <span>{label}</span>
-    </div>
+    </a>
   );
 }
